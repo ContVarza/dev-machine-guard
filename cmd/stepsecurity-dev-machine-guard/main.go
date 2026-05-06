@@ -166,10 +166,17 @@ func main() {
 		}
 
 	default:
-		// --npmrc: focused, verbose pretty audit of npm config only.
-		// Bypasses all other detectors for a fast (~1s) deep dive.
+		// --npmrc and --pipconfig: focused, verbose pretty audits that
+		// bypass everything else for a fast (~1s) deep dive.
 		if cfg.NPMRCOnly {
 			if err := runNPMRCOnly(exec, cfg); err != nil {
+				log.Error("%v", err)
+				os.Exit(1)
+			}
+			return
+		}
+		if cfg.PipConfigOnly {
+			if err := runPipConfigOnly(exec, cfg); err != nil {
 				log.Error("%v", err)
 				os.Exit(1)
 			}
@@ -216,6 +223,22 @@ func runNPMRCOnly(exec executor.Executor, cfg *cli.Config) error {
 		return scanJSONEncoder(os.Stdout).Encode(audit)
 	}
 	output.PrettyNPMRC(os.Stdout, &audit, dev, cfg.ColorMode)
+	return nil
+}
+
+// runPipConfigOnly executes only the pip-config detector and renders the
+// verbose pretty view (or JSON when --json is also passed).
+func runPipConfigOnly(exec executor.Executor, cfg *cli.Config) error {
+	ctx := context.Background()
+	dev := device.Gather(ctx, exec)
+	loggedInUser, _ := exec.LoggedInUser()
+
+	audit := detector.NewPipConfigDetector(exec).Detect(ctx, loggedInUser)
+
+	if cfg.OutputFormat == "json" {
+		return scanJSONEncoder(os.Stdout).Encode(audit)
+	}
+	output.PrettyPipConfig(os.Stdout, &audit, dev, cfg.ColorMode)
 	return nil
 }
 

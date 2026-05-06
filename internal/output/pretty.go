@@ -267,6 +267,11 @@ func Pretty(w io.Writer, result *model.ScanResult, colorMode string) error {
 		printNPMRCAuditSummary(w, c, result.NPMRCAudit)
 	}
 
+	// PIP CONFIG AUDIT (compact summary; deep view via --pipconfig)
+	if result.PipAudit != nil {
+		printPipAuditSummary(w, c, result.PipAudit)
+	}
+
 	return nil
 }
 
@@ -289,6 +294,27 @@ func printNPMRCAuditSummary(w io.Writer, c *colors, a *model.NPMRCAudit) {
 	fmt.Fprintln(w)
 }
 
+//nolint:errcheck // terminal output
+func printPipAuditSummary(w io.Writer, c *colors, a *model.PipAudit) {
+	fmt.Fprintf(w, "  %s%sPIP CONFIG AUDIT%s\n", c.purple, c.bold, c.reset)
+	if a.Available {
+		fmt.Fprintf(w, "    %spip:%s %s @ %s\n", c.dim, c.reset, a.Version, a.Path)
+	} else {
+		fmt.Fprintf(w, "    %spip:%s not found in PATH\n", c.dim, c.reset)
+	}
+	counts := map[string]int{}
+	for _, f := range a.Findings {
+		counts[f.Severity]++
+	}
+	fmt.Fprintf(w, "    %sfiles:%s %d   %sfindings:%s %sCRITICAL %d  HIGH %d  MEDIUM %d  LOW %d  INFO %d%s\n",
+		c.dim, c.reset, len(a.Files),
+		c.dim, c.reset,
+		c.bold, counts["CRITICAL"], counts["HIGH"], counts["MEDIUM"], counts["LOW"], counts["INFO"], c.reset)
+	if len(a.Findings) > 0 {
+		fmt.Fprintf(w, "    %srun --pipconfig for the deep view%s\n", c.dim, c.reset)
+	}
+	fmt.Fprintln(w)
+}
 
 //nolint:errcheck // terminal output
 func printSectionHeader(w io.Writer, c *colors, title string, count int) {

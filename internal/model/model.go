@@ -27,6 +27,7 @@ type ScanResult struct {
 	FlatpakPkgManager *PkgManager     `json:"flatpak_package_manager,omitempty"`
 	FlatpakPackages   []SystemPackage `json:"flatpak_packages"`
 	NPMRCAudit        *NPMRCAudit     `json:"npmrc_audit,omitempty"`
+	PipAudit          *PipAudit       `json:"pip_audit,omitempty"`
 	Summary           Summary         `json:"summary"`
 }
 
@@ -309,3 +310,100 @@ type NPMRCEnvVar struct {
 	ValueSHA256  string `json:"value_sha256,omitempty"`
 }
 
+// --- pip configuration audit -------------------------------------------------
+//
+// Mirrors NPMRCAudit but reflects pip-specific realities: real INI
+// sections, no env-var interpolation, and a fixed finding catalog
+// (pip-001 .. pip-024) instead of free-form classification.
+
+// PipAudit is the top-level pip audit object.
+type PipAudit struct {
+	Available      bool            `json:"pip_available"`
+	Invocation     string          `json:"pip_invocation,omitempty"` // "pip" | "pip3" | "python3 -m pip"
+	Version        string          `json:"pip_version,omitempty"`
+	Path           string          `json:"pip_path,omitempty"`
+	Files          []PipConfigFile `json:"files"`
+	EnvVars        []PipEnvVar     `json:"env_vars"`
+	Effective      *PipEffective   `json:"effective,omitempty"`
+	Netrc          *PipNetrcStatus `json:"netrc,omitempty"`
+	Findings       []PipFinding    `json:"findings"`
+	DiscoveryError string          `json:"discovery_error,omitempty"`
+}
+
+// PipConfigFile is one pip.conf / pip.ini discovered on disk. Layer is the
+// precedence layer pip itself assigns.
+type PipConfigFile struct {
+	Path        string       `json:"path"`
+	Layer       string       `json:"layer"` // global | user | user-legacy | site | PIP_CONFIG_FILE
+	Exists      bool         `json:"exists"`
+	Readable    bool         `json:"readable"`
+	SizeBytes   int64        `json:"size_bytes,omitempty"`
+	ModTimeUnix int64        `json:"mtime_unix,omitempty"`
+	Mode        string       `json:"mode,omitempty"`
+	OwnerName   string       `json:"owner_name,omitempty"`
+	GroupName   string       `json:"group_name,omitempty"`
+	SHA256      string       `json:"sha256,omitempty"`
+	InGitRepo   bool         `json:"in_git_repo,omitempty"`
+	GitTracked  bool         `json:"git_tracked,omitempty"`
+	Sections    []PipSection `json:"sections,omitempty"`
+	ParseError  string       `json:"parse_error,omitempty"`
+}
+
+// PipSection is one [section] block in a pip config file.
+type PipSection struct {
+	Name    string        `json:"name"` // "global", "install", "freeze", "wheel", "list", "hash", ...
+	LineNum int           `json:"line_num"`
+	Entries []PipKeyValue `json:"entries"`
+}
+
+// PipKeyValue is a single key/value (or key/multi-value) entry inside a
+// section. Repeatable options surface as multiple Values.
+type PipKeyValue struct {
+	Key     string   `json:"key"`
+	Values  []string `json:"values"`            // len()>=1; each value is a separate logical entry
+	Display string   `json:"display,omitempty"` // human-readable single-line rendering, with creds redacted
+	LineNum int      `json:"line_num"`
+}
+
+// PipEnvVar captures one PIP_* environment variable. Display is the
+// finding-grade safe-to-print form (creds redacted in URLs).
+type PipEnvVar struct {
+	Name    string `json:"name"`
+	Value   string `json:"-"` // raw; never serialized
+	Display string `json:"display"`
+	SHA256  string `json:"sha256,omitempty"`
+}
+
+// PipEffective is the merged-config view from `pip config list -v`. The
+// SourceByKey map keys are "<section>.<key>" to disambiguate the same key
+// appearing in multiple sections.
+type PipEffective struct {
+	SourceByKey map[string]string `json:"source_by_key,omitempty"`
+	Config      map[string]string `json:"config,omitempty"`
+	Error       string            `json:"error,omitempty"`
+}
+
+// PipFinding is one detection from the rule catalog (pip-001 .. pip-024).
+// ValueShown is always pre-redacted; the raw value never leaves the
+// detector.
+type PipFinding struct {
+	ID          string `json:"id"`       // "pip-001" etc.
+	Severity    string `json:"severity"` // CRITICAL | HIGH | MEDIUM | LOW | INFO
+	Category    string `json:"category"`
+	Source      string `json:"source"`            // file path or env var name
+	Section     string `json:"section,omitempty"` // "global" / "install" / "" for env vars
+	Key         string `json:"key,omitempty"`
+	ValueShown  string `json:"value_shown,omitempty"`
+	Detail      string `json:"detail"`
+	Remediation string `json:"remediation,omitempty"`
+}
+
+// PipNetrcStatus is informational: pip falls back to ~/.netrc for
+// credentials, so its presence + permissions matter even though we don't
+// parse the contents (.netrc is shared with curl/wget/twine/etc.; auditing
+// its content is a separate concern).
+type PipNetrcStatus struct {
+	Path   string `json:"path"`
+	Exists bool   `json:"exists"`
+	Mode   string `json:"mode,omitempty"` // empty on Windows
+}

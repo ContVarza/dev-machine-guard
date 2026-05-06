@@ -54,6 +54,7 @@ type Payload struct {
 	AIAgents             []model.AITool                  `json:"ai_agents"`
 	MCPConfigs           []model.MCPConfigEnterprise     `json:"mcp_configs"`
 	NPMRCAudit           *model.NPMRCAudit               `json:"npmrc_audit,omitempty"`
+	PipAudit             *model.PipAudit                 `json:"pip_audit,omitempty"`
 
 	ExecutionLogs      *ExecutionLogs      `json:"execution_logs,omitempty"`
 	PerformanceMetrics *PerformanceMetrics `json:"performance_metrics,omitempty"`
@@ -509,15 +510,20 @@ func Run(exec executor.Executor, log *progress.Logger, cfg *cli.Config) (err err
 		systemPackageScans = []model.SystemPackageScanResult{}
 	}
 
-	// npm config audit — surface-only inventory of every .npmrc on the
-	// host plus the merged effective view npm itself would resolve. We
-	// use the user-aware executor so npm resolves through the logged-in
-	// user's PATH (catches nvm / fnm / brew installs that root's PATH
-	// wouldn't see).
+	// npm + pip configuration audits — surface-only inventory of every
+	// .npmrc and pip.conf on the host, plus the merged effective views
+	// each tool would resolve. We use the user-aware executor so npm and
+	// pip resolve through the logged-in user's PATH (catches nvm / fnm /
+	// pyenv / asdf / brew installs that root's PATH wouldn't see).
 	log.Progress("Auditing npm configuration...")
 	npmrcLoggedIn, _ := exec.LoggedInUser()
 	npmrcAudit := detector.NewNPMRCDetector(userExec).Detect(ctx, searchDirs, npmrcLoggedIn)
 	log.Progress("  npm available: %v, files discovered: %d", npmrcAudit.Available, len(npmrcAudit.Files))
+	fmt.Fprintln(os.Stderr)
+
+	log.Progress("Auditing pip configuration...")
+	pipAudit := detector.NewPipConfigDetector(userExec).Detect(ctx, npmrcLoggedIn)
+	log.Progress("  pip available: %v, files discovered: %d, findings: %d", pipAudit.Available, len(pipAudit.Files), len(pipAudit.Findings))
 	fmt.Fprintln(os.Stderr)
 
 	// Finalize execution logs before building payload
@@ -553,6 +559,7 @@ func Run(exec executor.Executor, log *progress.Logger, cfg *cli.Config) (err err
 		AIAgents:             allAI,
 		MCPConfigs:           mcpConfigs,
 		NPMRCAudit:           &npmrcAudit,
+		PipAudit:             &pipAudit,
 
 		ExecutionLogs: &ExecutionLogs{
 			OutputBase64: execLogsBase64,

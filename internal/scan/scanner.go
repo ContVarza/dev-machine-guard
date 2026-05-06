@@ -215,6 +215,13 @@ func Run(exec executor.Executor, log *progress.Logger, cfg *cli.Config) error {
 	npmrcAudit := detector.NewNPMRCDetector(exec).Detect(ctx, searchDirs, loggedInUser)
 	log.StepDone(time.Since(start))
 
+	// pip config audit — same shape: every pip.conf / pip.ini discovered,
+	// merged effective view, env-var snapshot, and a fixed finding catalog.
+	log.StepStart("Auditing pip configuration")
+	start = time.Now()
+	pipAudit := detector.NewPipConfigDetector(exec).Detect(ctx, loggedInUser)
+	log.StepDone(time.Since(start))
+
 	// Ensure no nil slices (JSON must emit [] not null)
 	if aiTools == nil {
 		aiTools = []model.AITool{}
@@ -284,6 +291,7 @@ func Run(exec executor.Executor, log *progress.Logger, cfg *cli.Config) error {
 		FlatpakPkgManager: flatpakPkgManager,
 		FlatpakPackages:   flatpakPackages,
 		NPMRCAudit:        &npmrcAudit,
+		PipAudit:          &pipAudit,
 		Summary: model.Summary{
 			AIAgentsAndToolsCount: len(aiTools),
 			IDEInstallationsCount: len(ides),

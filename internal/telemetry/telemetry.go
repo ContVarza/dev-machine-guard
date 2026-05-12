@@ -674,6 +674,22 @@ func uploadToS3(ctx context.Context, log *progress.Logger, payload *Payload, exe
 		}
 
 		if err == nil && putResp.StatusCode == http.StatusOK {
+			// A real S3 PUT response always carries x-amz-request-id and
+			// x-amz-id-2 headers. If both are missing on a "200 OK", the
+			// response did not originate from AWS — typically a TLS-inspecting
+			// proxy, DLP appliance, or outbound-filtering firewall has
+			// terminated the connection and synthesized a success without
+			// forwarding the body to S3. Treat as a non-retryable failure so
+			// the run is reported as failed instead of cheerfully claiming
+			// success on bytes that never reached AWS.
+			reqID := putResp.Header.Get("x-amz-request-id")
+			id2 := putResp.Header.Get("x-amz-id-2")
+			if reqID == "" && id2 == "" {
+				proxyHint := putResp.Header.Get("Server")
+				_, _ = io.Copy(io.Discard, putResp.Body)
+				_ = putResp.Body.Close()
+				return fmt.Errorf("S3 PUT returned 200 but the response is not from AWS (missing x-amz-request-id and x-amz-id-2; Server=%q) — the upload likely did not reach S3, possibly intercepted by a TLS-inspecting proxy or outbound firewall on this network", proxyHint)
+			}
 			log.Progress("Uploaded to S3 in %s", elapsed)
 			break
 		}
@@ -709,6 +725,20 @@ func uploadToS3(ctx context.Context, log *progress.Logger, payload *Payload, exe
 	defer func() { _ = putResp.Body.Close() }()
 	_, _ = io.Copy(io.Discard, putResp.Body)
 
+	// Ask the backend to confirm the object actually exists in S3 before
+	// proceeding to notify. This catches the rare case where the PUT
+	// returned an AWS-headers-bearing 200 but the bytes still failed to
+	// persist, and gives the user a definitive line in the progress log
+	// independent of "backend processing started".
+	//
+	// The endpoint is best-effort from the agent's point of view: a
+	// definitive uploaded=false is fatal, but transport errors or unknown
+	// status codes (e.g. an old backend that doesn't expose this route)
+	// fall through to notify, whose own precheck is the safety net.
+	if err := confirmUploadInS3(ctx, log, client, urlResp.S3Key, payload.DeviceID); err != nil {
+		return err
+	}
+
 	// Notify backend
 	log.Progress("Notifying backend of upload...")
 	notifyBody, _ := json.Marshal(map[string]string{
@@ -741,6 +771,79 @@ func uploadToS3(ctx context.Context, log *progress.Logger, payload *Payload, exe
 	}
 	log.Progress("Backend processing initiated (HTTP %d)", notifyResp.StatusCode)
 
+	return nil
+}
+
+// confirmUploadInS3 calls the backend's /telemetry/confirm-upload endpoint
+// to get a definitive uploaded/not-uploaded answer for the s3_key the
+// agent was issued. Returns a non-nil error only when the backend
+// confirms the object is missing (uploaded=false) — anything else
+// (transport failure, non-200, parse error, old backend without the
+// route) is logged and treated as non-fatal so the run still proceeds
+// to notify, which has its own precheck as a safety net.
+func confirmUploadInS3(ctx context.Context, log *progress.Logger, client *http.Client, s3Key, deviceID string) error {
+	log.Progress("Confirming upload reached S3...")
+
+	body, _ := json.Marshal(map[string]string{
+		"s3_key":    s3Key,
+		"device_id": deviceID,
+	})
+	endpoint := fmt.Sprintf("%s/v1/%s/developer-mdm-agent/telemetry/confirm-upload",
+		config.APIEndpoint, config.CustomerID)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		log.Warn("confirm-upload: request build failed (%v); proceeding to notify", err)
+		return nil
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+config.APIKey)
+	req.Header.Set("X-Agent-Version", buildinfo.Version)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Warn("confirm-upload: request failed (%v); proceeding to notify", err)
+		return nil
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode == http.StatusNotFound {
+		// Backend predates the confirm-upload endpoint. Fine — notify's
+		// precheck still catches a missing object server-side.
+		log.Debug("confirm-upload: endpoint not available on this backend; falling back to notify-only flow")
+		_, _ = io.Copy(io.Discard, resp.Body)
+		return nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		log.Warn("confirm-upload: HTTP %d; proceeding to notify", resp.StatusCode)
+		_, _ = io.Copy(io.Discard, resp.Body)
+		return nil
+	}
+
+	var result struct {
+		Uploaded  bool   `json:"uploaded"`
+		SizeBytes int64  `json:"size_bytes"`
+		Reason    string `json:"reason"`
+		S3Key     string `json:"s3_key"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		log.Warn("confirm-upload: malformed response (%v); proceeding to notify", err)
+		return nil
+	}
+
+	if !result.Uploaded {
+		// Definitive negative answer from the backend — the object the
+		// agent thought it uploaded is not in S3. Stop here so the run
+		// is recorded as failed with a specific reason, rather than
+		// queueing a doomed worker job.
+		reason := result.Reason
+		if reason == "" {
+			reason = "unknown"
+		}
+		return fmt.Errorf("backend reports upload not in S3 (reason=%s, s3_key=%s) — the PUT returned success but no object exists; likely intercepted upstream", reason, s3Key)
+	}
+
+	log.Progress("Upload confirmed in S3 (%d bytes)", result.SizeBytes)
 	return nil
 }
 

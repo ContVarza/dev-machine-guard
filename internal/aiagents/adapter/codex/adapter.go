@@ -22,6 +22,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"slices"
 
 	"github.com/step-security/dev-machine-guard/internal/aiagents/adapter"
@@ -196,8 +197,17 @@ func (a *Adapter) Uninstall(ctx context.Context) (adapter.UninstallResult, error
 //
 // The binary path is absolute and symlink-resolved at install time;
 // see internal/aiagents/cli/selfpath.go.
+//
+// On Windows the path is forward-slashed because Codex executes hook
+// commands through bash (Git Bash on windows-latest runners), and bash
+// interprets backslashes in unquoted tokens as escape sequences —
+// `C:\Users\foo` becomes `C:Usersfoo` and the binary fails to resolve.
 func (a *Adapter) commandFor(hookEvent event.HookEvent) string {
-	return a.binaryPath + " _hook " + AgentName + " " + string(hookEvent)
+	bp := a.binaryPath
+	if runtime.GOOS == "windows" {
+		bp = filepath.ToSlash(bp)
+	}
+	return bp + " _hook " + AgentName + " " + string(hookEvent)
 }
 
 // noopResponse marshals to {} — Codex treats empty output / {} as

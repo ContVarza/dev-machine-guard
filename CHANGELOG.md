@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 See [VERSIONING.md](VERSIONING.md) for why the version starts at 1.8.1.
 
+## [1.11.2] - 2026-05-21
+
+### Added
+
+- **AI agent hook state polling**: agents periodically check the StepSecurity backend for desired hook enable/disable state and reconcile local installation to match. Silent no-op in community mode; failures are logged but never crash the scanner.
+- **Static machine resource info in device payload**: each scan now reports CPU model and count, total RAM, and disk capacity for the scanned host, giving the dashboard a clearer picture of the endpoint context.
+
+### Fixed
+
+- **Windows scheduled task user context**: the scheduled task now runs under the logged-in user via `/ru INTERACTIVE` instead of `SYSTEM`, so the scanner can read `HKCU`, `%USERPROFILE%`, and the user's `PATH` — fixing a class of missed detections for tools installed in user scope.
+- **Windows agent log directory permissions**: `C:\ProgramData\StepSecurity` now grants `BUILTIN\Users` Modify rights so the scheduled task (running as the logged-in user) can append to `agent.log` instead of failing with Access Denied.
+- **AI agent hook command path on Windows**: hook entries written into agent config files now use forward-slash paths, avoiding Windows shell quoting issues that could prevent the hook from firing.
+- **pnpm v11 global scan regression**: globally installed pnpm packages were missing from the npm scan output on pnpm v11; detection logic updated for the new layout.
+- **Linux/macOS lock contention race**: an edge case where the singleton-lock check could misidentify the console user on systems with no active interactive session is fixed.
+
+### Changed
+
+- **CI: gosec SAST scan** added to the workflow set, with a corresponding badge in the README.
+- **CI: cross-platform build + vet/fmt/tidy** checks added to the Tests workflow, surfacing platform-specific compile errors at PR time instead of at release time.
+
 ## [1.11.1] - 2026-05-05
 
 ### Added
@@ -159,6 +179,7 @@ First open-source release. The scanning engine was previously an internal enterp
 - Execution log capture and base64 encoding
 - Instance locking to prevent concurrent runs
 
+[1.11.2]: https://github.com/step-security/dev-machine-guard/compare/v1.11.1...v1.11.2
 [1.11.1]: https://github.com/step-security/dev-machine-guard/compare/v1.11.0...v1.11.1
 [1.11.0]: https://github.com/step-security/dev-machine-guard/compare/v1.10.2...v1.11.0
 [1.10.2]: https://github.com/step-security/dev-machine-guard/compare/v1.10.1...v1.10.2

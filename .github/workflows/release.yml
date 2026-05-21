@@ -208,15 +208,16 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Install WiX 4
-        # WiX 4 ships as a .NET global tool. windows-latest has the .NET SDK
-        # preinstalled, so this resolves quickly. We pin to a known-working
-        # version. Linux/macOS hosts have WiX 4 issues with Directory/@Name
-        # path validation — we always build the MSI on Windows.
+      - name: Install WiX 4 + Util extension
+        # WiX 4 ships as a .NET global tool. The Util extension (WixQuietExec
+        # and friends) is a separate NuGet package that must be added to the
+        # global wix tool before referencing util: namespace types.
         shell: pwsh
         run: |
           dotnet tool install --global wix --version 4.0.5
           wix --version
+          wix extension add --global WixToolset.Util.wixext/4.0.5
+          wix extension list --global
 
       - name: Download Windows .exe assets from draft release
         env:
@@ -248,6 +249,7 @@ jobs:
 
           wix build packaging/windows/Product.wxs `
             -arch x64 `
+            -ext WixToolset.Util.wixext `
             -d Arch=x64 `
             -d "Version=$version" `
             -d "BinaryPath=$($amd64.FullName)" `
@@ -255,6 +257,7 @@ jobs:
 
           wix build packaging/windows/Product.wxs `
             -arch arm64 `
+            -ext WixToolset.Util.wixext `
             -d Arch=arm64 `
             -d "Version=$version" `
             -d "BinaryPath=$($arm64.FullName)" `

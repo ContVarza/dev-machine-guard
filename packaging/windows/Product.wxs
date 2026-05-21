@@ -14,7 +14,8 @@
   msiexec — powershell.exe is never spawned anywhere in install/upgrade/
   uninstall flows.
 -->
-<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
 
   <?if $(var.Arch) = "x64" ?>
     <?define UpgradeCode = "65AE0FC0-2070-4F40-B0CA-413637F94121" ?>
@@ -99,35 +100,43 @@
       ================================================================
     -->
 
-    <!-- Use the Property-attribute pattern (MSI Type 50: exe-from-property).
-         Discovered the hard way that WiX 4 silently strips [CustomActionData]
-         tokens out of ExeCommand at compile time, so Directory+ExeCommand
-         CAs end up with empty (or args-less) Target columns. The Property
-         pattern bypasses ExeCommand entirely: MSI reads the FULL command
-         line (path + args) directly from a property whose name matches the
-         CA's Id, which gets auto-populated as CustomActionData for the
-         deferred execution. -->
+    <!-- Use WixQuietExec from WixToolset.Util.wixext. This is the WiX-blessed
+         pattern for running an exe with property-substituted args from a
+         deferred custom action. WiX 4 has a known bug where [CustomActionData]
+         in ExeCommand is silently stripped at compile time
+         (https://github.com/orgs/wixtoolset/discussions/9143), and the bare
+         Property attribute is invalid without ExeCommand. WixQuietExec is a
+         DLL CA that reads its command line from a property whose Id matches
+         the CA Id — solving the relay problem cleanly.
+
+         BinaryRef "Wix4UtilCA_$(sys.BUILDARCHSHORT)" auto-selects the right
+         arch (X64 for our x64 MSI, A64 for arm64).
+         DllEntry "WixQuietExec64" runs in 64-bit context. -->
 
     <CustomAction Id="RunConfigureInline"
-                  Property="RunConfigureInline"
+                  BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
+                  DllEntry="WixQuietExec64"
                   Execute="deferred"
                   Impersonate="no"
                   Return="check"/>
 
     <CustomAction Id="RunConfigureFromFile"
-                  Property="RunConfigureFromFile"
+                  BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
+                  DllEntry="WixQuietExec64"
                   Execute="deferred"
                   Impersonate="no"
                   Return="check"/>
 
     <CustomAction Id="RunInstallScheduledTask"
-                  Property="RunInstallScheduledTask"
+                  BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
+                  DllEntry="WixQuietExec64"
                   Execute="deferred"
                   Impersonate="no"
                   Return="check"/>
 
     <CustomAction Id="RunUninstallScheduledTask"
-                  Property="RunUninstallScheduledTask"
+                  BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
+                  DllEntry="WixQuietExec64"
                   Execute="deferred"
                   Impersonate="no"
                   Return="ignore"/>

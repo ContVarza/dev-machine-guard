@@ -20,6 +20,7 @@ import (
 	"github.com/step-security/dev-machine-guard/internal/detector/configaudit"
 	"github.com/step-security/dev-machine-guard/internal/device"
 	"github.com/step-security/dev-machine-guard/internal/executor"
+	"github.com/step-security/dev-machine-guard/internal/featuregate"
 	"github.com/step-security/dev-machine-guard/internal/launchd"
 	"github.com/step-security/dev-machine-guard/internal/output"
 	"github.com/step-security/dev-machine-guard/internal/paths"
@@ -47,6 +48,12 @@ func main() {
 	// minimal config.Load (just enough for the upload gate) so this branch
 	// stays free of the rest of main's setup work.
 	if len(os.Args) >= 2 && os.Args[1] == "_hook" {
+		// Gated: silently no-op so any pre-existing hook entry that points
+		// at this binary stays harmless until the feature ships. Override
+		// flows in via STEPSECURITY_OVERRIDE_GATE since Parse hasn't run.
+		if !featuregate.IsEnabled(featuregate.FeatureAIAgentHooks) {
+			os.Exit(0)
+		}
 		os.Exit(aiagentscli.RunHook(os.Stdin, os.Stdout, os.Stderr, os.Args[2:]))
 	}
 
@@ -57,6 +64,10 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
 		os.Exit(1)
+	}
+
+	if cfg.OverrideGate {
+		featuregate.EnableOverride()
 	}
 
 	// Apply saved config values if CLI didn't explicitly override them.
@@ -298,15 +309,27 @@ func main() {
 		}
 
 	case "hooks install":
+		if !featuregate.IsEnabled(featuregate.FeatureAIAgentHooks) {
+			fmt.Fprintln(os.Stderr, featuregate.UnavailableMessage("hooks install"))
+			os.Exit(1)
+		}
 		os.Exit(aiagentscli.RunInstall(context.Background(), exec, cfg.HooksAgent, os.Stdout, os.Stderr))
 
 	case "hooks uninstall":
+		if !featuregate.IsEnabled(featuregate.FeatureAIAgentHooks) {
+			fmt.Fprintln(os.Stderr, featuregate.UnavailableMessage("hooks uninstall"))
+			os.Exit(1)
+		}
 		os.Exit(aiagentscli.RunUninstall(context.Background(), exec, cfg.HooksAgent, os.Stdout, os.Stderr))
 
 	default:
 		// --npmrc and --pipconfig: focused, verbose pretty audits that
 		// bypass everything else for a fast (~1s) deep dive.
 		if cfg.NPMRCOnly {
+			if !featuregate.IsEnabled(featuregate.FeatureNPMRCAudit) {
+				fmt.Fprintln(os.Stderr, featuregate.UnavailableMessage("--npmrc"))
+				os.Exit(1)
+			}
 			if err := runNPMRCOnly(exec, cfg); err != nil {
 				log.Error("%v", err)
 				os.Exit(1)
@@ -314,6 +337,10 @@ func main() {
 			return
 		}
 		if cfg.PipConfigOnly {
+			if !featuregate.IsEnabled(featuregate.FeaturePipConfigAudit) {
+				fmt.Fprintln(os.Stderr, featuregate.UnavailableMessage("--pipconfig"))
+				os.Exit(1)
+			}
 			if err := runPipConfigOnly(exec, cfg); err != nil {
 				log.Error("%v", err)
 				os.Exit(1)
@@ -432,6 +459,10 @@ func findLegacyLeftovers(legacy string) []string {
 // in community mode (enterprise config missing) — the existing scan
 // path stays unaffected. Failures are logged but never crash main.
 func runHookStateReconcile(exec executor.Executor, log *progress.Logger) {
+	if !featuregate.IsEnabled(featuregate.FeatureAIAgentHooks) {
+		log.Debug("hook-state reconcile: skipped (feature gated)")
+		return
+	}
 	cfg, ok := ingest.Snapshot()
 	if !ok {
 		log.Debug("hook-state reconcile: skipped (no enterprise config)")

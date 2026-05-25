@@ -66,6 +66,24 @@ func TestParse_Verbose(t *testing.T) {
 	}
 }
 
+func TestParse_OverrideGate(t *testing.T) {
+	cfg, err := Parse([]string{"--override-gate"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.OverrideGate {
+		t.Error("expected OverrideGate=true on top-level parse")
+	}
+
+	cfg, err = Parse([]string{"hooks", "install", "--override-gate"})
+	if err != nil {
+		t.Fatalf("parseHooks should accept --override-gate: %v", err)
+	}
+	if !cfg.OverrideGate {
+		t.Error("expected OverrideGate=true on hooks parse")
+	}
+}
+
 func TestParse_Color(t *testing.T) {
 	for _, mode := range []string{"auto", "always", "never"} {
 		cfg, err := Parse([]string{"--color=" + mode})

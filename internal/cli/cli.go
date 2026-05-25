@@ -57,6 +57,12 @@ type Config struct {
 	// custom actions and other unattended orchestrators set this so a
 	// transient network hiccup doesn't roll back the whole install.
 	IgnoreTelemetryError bool
+
+	// OverrideGate disables feature gating for this invocation, letting
+	// every capability run regardless of the featuregate allowlist.
+	// Internal — not advertised in --help. Equivalent env var:
+	// STEPSECURITY_OVERRIDE_GATE=1.
+	OverrideGate bool
 }
 
 // supportedHookAgents lists the agent names accepted by `hooks --agent <name>` and `_hook <agent> ...`.
@@ -211,6 +217,8 @@ func Parse(args []string) (*Config, error) {
 			cfg.ConfigScanFrequency = strings.TrimPrefix(arg, "--scan-frequency=")
 		case arg == "--verbose":
 			cfg.Verbose = true
+		case arg == "--override-gate":
+			cfg.OverrideGate = true
 		case strings.HasPrefix(arg, "--log-level="):
 			level := strings.ToLower(strings.TrimPrefix(arg, "--log-level="))
 			switch level {
@@ -312,6 +320,8 @@ func parseHooks(args []string) (*Config, error) {
 			}
 			cfg.InstallDir = rest[i]
 			cfg.InstallDirSet = true
+		case arg == "--override-gate":
+			cfg.OverrideGate = true
 		case arg == "-h" || arg == "--help":
 			printHooksHelp()
 			os.Exit(0)

@@ -11,6 +11,7 @@ import (
 	"github.com/step-security/dev-machine-guard/internal/detector/configaudit"
 	"github.com/step-security/dev-machine-guard/internal/device"
 	"github.com/step-security/dev-machine-guard/internal/executor"
+	"github.com/step-security/dev-machine-guard/internal/featuregate"
 	"github.com/step-security/dev-machine-guard/internal/model"
 	"github.com/step-security/dev-machine-guard/internal/output"
 	"github.com/step-security/dev-machine-guard/internal/progress"
@@ -208,20 +209,28 @@ func Run(exec executor.Executor, log *progress.Logger, cfg *cli.Config) error {
 	}
 
 	// npm config audit — surface-only inventory of every .npmrc on the host
-	// plus the merged effective view npm itself would resolve. Always on;
-	// the audit is cheap (a few stat calls and at most two npm invocations).
-	log.StepStart("Auditing npm configuration")
-	start = time.Now()
+	// plus the merged effective view npm itself would resolve. The audit is
+	// cheap (a few stat calls and at most two npm invocations) but stays
+	// inert until the feature ships; zero-value structs flow through to the
+	// output so JSON/HTML keep emitting the audit shape.
 	loggedInUser, _ := exec.LoggedInUser()
-	npmrcAudit := configaudit.NewNPMRCDetector(exec).Detect(ctx, searchDirs, loggedInUser)
-	log.StepDone(time.Since(start))
+	var npmrcAudit model.NPMRCAudit
+	if featuregate.IsEnabled(featuregate.FeatureNPMRCAudit) {
+		log.StepStart("Auditing npm configuration")
+		start = time.Now()
+		npmrcAudit = configaudit.NewNPMRCDetector(exec).Detect(ctx, searchDirs, loggedInUser)
+		log.StepDone(time.Since(start))
+	}
 
 	// pip config audit — same shape: every pip.conf / pip.ini discovered,
 	// merged effective view, env-var snapshot, and a fixed finding catalog.
-	log.StepStart("Auditing pip configuration")
-	start = time.Now()
-	pipAudit := configaudit.NewPipConfigDetector(exec).Detect(ctx, loggedInUser)
-	log.StepDone(time.Since(start))
+	var pipAudit model.PipAudit
+	if featuregate.IsEnabled(featuregate.FeaturePipConfigAudit) {
+		log.StepStart("Auditing pip configuration")
+		start = time.Now()
+		pipAudit = configaudit.NewPipConfigDetector(exec).Detect(ctx, loggedInUser)
+		log.StepDone(time.Since(start))
+	}
 
 	// Ensure no nil slices (JSON must emit [] not null)
 	if aiTools == nil {

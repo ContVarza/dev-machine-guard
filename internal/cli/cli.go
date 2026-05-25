@@ -30,6 +30,7 @@ type Config struct {
 	EnableBrewScan        *bool    // nil=auto, true/false=explicit
 	EnablePythonScan      *bool    // nil=auto, true/false=explicit
 	IncludeBundledPlugins bool     // --include-bundled-plugins: include bundled/platform plugins in output
+	IncludeTCCProtected   bool     // --include-tcc-protected: on macOS, scan inside well-known TCC-protected dirs (Documents, Downloads, ~/Library/Mail, ...) even though doing so triggers permission prompts. Default off.
 	NPMRCOnly             bool     // --npmrc: run only the npmrc audit and render verbose pretty output
 	PipConfigOnly         bool     // --pipconfig: run only the pip config audit and render verbose pretty output
 	SearchDirs            []string // defaults to ["$HOME"]
@@ -146,6 +147,8 @@ func Parse(args []string) (*Config, error) {
 			cfg.EnablePythonScan = &v
 		case arg == "--include-bundled-plugins":
 			cfg.IncludeBundledPlugins = true
+		case arg == "--include-tcc-protected":
+			cfg.IncludeTCCProtected = true
 		case arg == "--npmrc":
 			cfg.NPMRCOnly = true
 		case arg == "--pipconfig":
@@ -393,6 +396,9 @@ Options:
   --enable-python-scan          Enable Python package scanning
   --disable-python-scan         Disable Python package scanning
   --include-bundled-plugins     Include bundled/platform plugins in output (Windows)
+  --include-tcc-protected       Scan macOS TCC-protected dirs (Documents, Downloads,
+                                ~/Library/Mail, etc.). Default: skipped to avoid
+                                permission prompts.
   --npmrc                       Run ONLY the npm config audit (verbose pretty view; --json supported)
   --pipconfig                   Run ONLY the pip config audit (verbose pretty view; --json supported)
   --log-level=LEVEL      Log level: error | warn | info | debug (default: info)

@@ -15,6 +15,7 @@ import (
 	"github.com/step-security/dev-machine-guard/internal/model"
 	"github.com/step-security/dev-machine-guard/internal/output"
 	"github.com/step-security/dev-machine-guard/internal/progress"
+	"github.com/step-security/dev-machine-guard/internal/tcc"
 )
 
 // Run executes a community-mode scan and outputs results.
@@ -29,6 +30,19 @@ func Run(exec executor.Executor, log *progress.Logger, cfg *cli.Config) error {
 			log.Warn("search directory %q is not accessible: %v — it will be skipped", d, err)
 		} else if !info.IsDir() {
 			log.Warn("search directory %q is not a directory — it will be skipped", d)
+		}
+	}
+
+	// Build the TCC skipper so directory walks avoid macOS-protected dirs
+	// (Documents, Downloads, ~/Library/Mail, ...) and don't trigger system
+	// permission prompts. Nil when --include-tcc-protected is set; the
+	// skipper's ShouldSkip is nil-safe so downstream callers don't branch.
+	var tccSkipper *tcc.Skipper
+	if !cfg.IncludeTCCProtected {
+		tccSkipper = tcc.New(resolveHome(exec))
+		if cands := tccSkipper.Candidates(); len(cands) > 0 {
+			log.Warn("macOS TCC: skipping %d protected dirs (Documents, Downloads, ~/Library/Mail, ...) to avoid permission prompts. Pass --include-tcc-protected to scan them.", len(cands))
+			log.Debug("tcc skip list: %v", cands)
 		}
 	}
 
@@ -107,7 +121,7 @@ func Run(exec executor.Executor, log *progress.Logger, cfg *cli.Config) error {
 
 		log.StepStart("Scanning Node.js projects")
 		start = time.Now()
-		projectDetector := detector.NewNodeProjectDetector(exec)
+		projectDetector := detector.NewNodeProjectDetector(exec).WithSkipper(tccSkipper)
 		nodeProjects = projectDetector.ListProjects(searchDirs)
 		log.StepDone(time.Since(start))
 	} else {
@@ -200,7 +214,7 @@ func Run(exec executor.Executor, log *progress.Logger, cfg *cli.Config) error {
 
 		log.StepStart("Scanning Python projects")
 		start = time.Now()
-		pyProjectDetector := detector.NewPythonProjectDetector(exec)
+		pyProjectDetector := detector.NewPythonProjectDetector(exec).WithSkipper(tccSkipper)
 		pythonProjects = pyProjectDetector.ListProjects(searchDirs)
 		log.StepDone(time.Since(start))
 	} else {
@@ -218,7 +232,7 @@ func Run(exec executor.Executor, log *progress.Logger, cfg *cli.Config) error {
 	if featuregate.IsEnabled(featuregate.FeatureNPMRCAudit) {
 		log.StepStart("Auditing npm configuration")
 		start = time.Now()
-		npmrcAudit = configaudit.NewNPMRCDetector(exec).Detect(ctx, searchDirs, loggedInUser)
+		npmrcAudit = configaudit.NewNPMRCDetector(exec).WithSkipper(tccSkipper).Detect(ctx, searchDirs, loggedInUser)
 		log.StepDone(time.Since(start))
 	}
 
@@ -347,6 +361,19 @@ func resolveSearchDirs(exec executor.Executor, dirs []string) []string {
 		resolved = append(resolved, d)
 	}
 	return resolved
+}
+
+// resolveHome returns the home directory of the console user when present,
+// falling back to the process's current user (issue #63 fallback). Empty
+// string when neither resolves — callers degrade gracefully.
+func resolveHome(exec executor.Executor) string {
+	if u, err := exec.LoggedInUser(); err == nil {
+		return u.HomeDir
+	}
+	if u, err := exec.CurrentUser(); err == nil {
+		return u.HomeDir
+	}
+	return ""
 }
 
 func mergeAITools(cli, agents, frameworks []model.AITool) []model.AITool {

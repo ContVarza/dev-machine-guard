@@ -256,6 +256,17 @@ func Parse(args []string) (*Config, error) {
 		return nil, fmt.Errorf("--npmrc and --pipconfig are mutually exclusive; pick one")
 	}
 
+	// --install-dir= (explicit empty) disables file logging by routing
+	// paths.Home() to "" globally. That conflicts with `install` /
+	// `uninstall`, whose platform installers (systemd / launchd) call
+	// os.MkdirAll(paths.Home()) and bake STEPSECURITY_HOME into the unit
+	// file — both break or write nonsense values when Home() is empty.
+	// Reject the combination here with a clear message rather than
+	// letting the installer fail opaquely on an empty path.
+	if cfg.InstallDirSet && cfg.InstallDir == "" && (cfg.Command == "install" || cfg.Command == "uninstall") {
+		return nil, fmt.Errorf("--install-dir= (empty) cannot be combined with %s — pass a directory or omit the flag", cfg.Command)
+	}
+
 	return cfg, nil
 }
 

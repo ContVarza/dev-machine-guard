@@ -58,12 +58,25 @@ func main() {
 func run(argv []string) int {
 	target, childArgs, err := launcher.ResolveTarget(argv)
 	if err != nil {
-		// stderr is normally unreachable for a GUI-subsystem process
-		// launched by Task Scheduler, but it's visible to interactive
-		// invocations and to test runs — both worth surfacing the
-		// concrete misuse string for.
-		fmt.Fprintln(os.Stderr, err)
-		return 2
+		// Two distinct failure shapes, matched to the legacy contract:
+		//
+		//   - Default mode (no --exec): the launcher silently exits 1.
+		//     This preserves byte-for-byte compatibility with MSI installs
+		//     that the pre-1.11.5 launcher served. Task Scheduler records
+		//     "LastTaskResult=1" — same value MSI deployments have always
+		//     observed when the sibling agent is absent. A behavioral
+		//     change here would shift downstream dashboards/alerts that
+		//     key on the result code.
+		//
+		//   - --exec mode: the caller asked for a feature; surface the
+		//     concrete misuse (missing target, unresolved PATH, etc.) on
+		//     stderr with a distinct exit code so dispatch failures are
+		//     diagnosable.
+		if len(argv) > 0 && argv[0] == launcher.ExecFlag {
+			fmt.Fprintln(os.Stderr, err)
+			return 2
+		}
+		return 1
 	}
 
 	cmd := exec.Command(target, childArgs...)

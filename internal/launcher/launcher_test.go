@@ -2,6 +2,7 @@ package launcher
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -101,17 +102,39 @@ func TestResolveTarget_DefaultMode_FindsSibling(t *testing.T) {
 	siblingPath := filepath.Join(siblingDir, AgentBinary)
 
 	// Don't clobber a real agent that might be sitting next to the test
-	// binary in a developer's checkout — restore whatever was there.
-	prev, hadPrev := os.ReadFile(siblingPath)
-	_ = prev
+	// binary in a developer's checkout. Three cases to handle correctly:
+	//
+	//   - File doesn't exist (ErrNotExist) — seed the fake, delete on
+	//     cleanup. Normal CI path.
+	//   - File exists and is readable — capture bytes + mode, seed the
+	//     fake, restore both on cleanup.
+	//   - File exists but can't be read (permission, locked) — we'd
+	//     destroy the developer's checkout if we overwrote it. Skip
+	//     the test instead.
+	prev, readErr := os.ReadFile(siblingPath)
+	var prevMode os.FileMode = 0o644
+	if readErr == nil {
+		// Capture the original mode so the file is restored byte-for-
+		// byte AND mode-for-mode. Without this, a real Authenticode-
+		// signed .exe with the executable bit set on POSIX (rare on
+		// CI but possible in a dual-platform checkout) would come back
+		// non-executable.
+		if info, statErr := os.Stat(siblingPath); statErr == nil {
+			prevMode = info.Mode().Perm()
+		}
+	} else if !errors.Is(readErr, fs.ErrNotExist) {
+		t.Skipf("cannot read existing sibling %q without risking developer state: %v", siblingPath, readErr)
+	}
 
 	if err := os.WriteFile(siblingPath, []byte("fake-agent"), 0o644); err != nil {
 		t.Fatalf("seeding fake agent at %q: %v", siblingPath, err)
 	}
 	t.Cleanup(func() {
-		if hadPrev == nil {
-			_ = os.WriteFile(siblingPath, prev, 0o644)
+		if readErr == nil {
+			// Restore both bytes and mode.
+			_ = os.WriteFile(siblingPath, prev, prevMode)
 		} else {
+			// Original was absent; remove our seed.
 			_ = os.Remove(siblingPath)
 		}
 	})

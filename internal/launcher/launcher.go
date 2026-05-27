@@ -44,16 +44,20 @@ const (
 //     compatibility with the launcher's pre-1.11.5 behaviour, which is
 //     what the MSI install layout's scheduled task action uses.
 //
-// Errors:
+// Errors (all returned from this function; the caller in cmd/.../main.go
+// is responsible for mapping them to exit codes + stderr output per the
+// contract below):
 //
-//   - --exec without a target: malformed task action; surfaced so Task
-//     Scheduler's "last result" column reflects the misconfiguration.
-//   - --exec target not on PATH: same idea — visible at install time
-//     rather than silently exiting 1.
+//   - --exec without a target: malformed task action.
+//   - --exec target not on PATH: visible at install time rather than
+//     silently exiting.
 //   - Default mode with no sibling agent: most commonly indicates the
-//     launcher was deployed without its companion; matches the previous
-//     behaviour (return error → exit 1 → no console output) so existing
-//     MSI installs see no behaviour change.
+//     launcher was deployed without its companion.
+//
+// The launcher entrypoint distinguishes the two error contexts:
+// --exec errors are written to stderr and the process exits 2, while
+// default-mode errors stay silent and exit 1 (preserving byte-for-byte
+// compatibility with the pre-1.11.5 launcher that MSI installs rely on).
 func ResolveTarget(argv []string) (string, []string, error) {
 	if len(argv) > 0 && argv[0] == ExecFlag {
 		if len(argv) < 2 {

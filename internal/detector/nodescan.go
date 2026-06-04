@@ -42,11 +42,12 @@ type NodeScanner struct {
 	// PhaseTracker.UpdateDetail so heartbeats surface mid-phase progress.
 	ProgressHook func(detail string)
 	// pmAvailability caches checkPath results per package-manager binary
-	// for the lifetime of a single ScanProjects call. On a device with 700+
+	// for the lifetime of the NodeScanner instance. On a device with 700+
 	// lockfiles, the per-project scan path previously paid a PATH lookup
 	// per project; this cache collapses that to one lookup per distinct
-	// PM. Also avoided: spamming the same "x not found in PATH" warning
-	// hundreds of times when the PM truly isn't installed.
+	// PM. A scanner is created once per telemetry run (see
+	// internal/telemetry/telemetry.go), so the cache's effective scope
+	// matches a single scan even though the map isn't reset.
 	pmAvailability map[string]error
 }
 
@@ -61,7 +62,7 @@ func NewNodeScanner(exec executor.Executor, log *progress.Logger, loggedInUser s
 
 // binaryAvailable returns the cached checkPath result for a package-manager
 // binary, populating the cache on first call. Wraps checkPath so callers in
-// the per-project loop don't pay an LookPath per project on devices that
+// the per-project loop don't pay a LookPath per project on devices that
 // have hundreds of lockfiles for a PM that isn't installed.
 func (s *NodeScanner) binaryAvailable(ctx context.Context, name string) error {
 	if err, ok := s.pmAvailability[name]; ok {
@@ -430,7 +431,7 @@ func (s *NodeScanner) ScanProjects(ctx context.Context, searchDirs []string) []m
 		pm := DetectProjectPM(s.exec, p.dir)
 		s.log.Progress("    Package manager: %s", pm)
 
-		r, ok := s.scanProject(ctx, p.dir)
+		r, ok := s.scanProject(ctx, p.dir, pm)
 		if !ok {
 			// PM not installed on this device — not an error, just nothing
 			// to scan. Skip without emitting a telemetry record.
@@ -457,9 +458,13 @@ func (s *NodeScanner) ScanProjects(ctx context.Context, searchDirs []string) []m
 // the case when the PM binary isn't on PATH, which is a normal "Node not
 // installed on this device" state, not a scan failure. Mirrors the
 // (result, ok) shape of scanNPMGlobal / scanYarnGlobal / scanPnpmGlobal.
-func (s *NodeScanner) scanProject(ctx context.Context, projectDir string) (model.NodeScanResult, bool) {
-	pm := DetectProjectPM(s.exec, projectDir)
-
+//
+// pm is passed in by the caller (ScanProjects already detects it once for
+// the per-project progress log); we accept it as an argument rather than
+// re-running DetectProjectPM here to avoid duplicating the FileExists /
+// DirExists checks per project and to keep the detected value consistent
+// with what the caller logged.
+func (s *NodeScanner) scanProject(ctx context.Context, projectDir, pm string) (model.NodeScanResult, bool) {
 	var cmd string
 	var args []string
 	switch pm {

@@ -327,7 +327,7 @@ func TestNodeScanner_ScanProject_Windows(t *testing.T) {
 		"npm", "ls", "--json", "--depth=3")
 
 	scanner := newTestScanner(mock)
-	result, ok := scanner.scanProject(context.Background(), `C:\Users\dev\myapp`)
+	result, ok := scanner.scanProject(context.Background(), `C:\Users\dev\myapp`, "npm")
 
 	if !ok {
 		t.Fatal("expected scanProject to emit a result when npm is available")
@@ -364,7 +364,7 @@ func TestNodeScanner_ScanProject_YarnBerry_Windows(t *testing.T) {
 		"yarn", "info", "--all", "--json")
 
 	scanner := newTestScanner(mock)
-	result, ok := scanner.scanProject(context.Background(), projectDir)
+	result, ok := scanner.scanProject(context.Background(), projectDir, "yarn-berry")
 
 	if !ok {
 		t.Fatal("expected scanProject to emit a result when yarn is available")
@@ -380,13 +380,14 @@ func TestNodeScanner_ScanProject_YarnBerry_Windows(t *testing.T) {
 	}
 }
 
-// TestNodeScanner_ScanProject_PMNotInPATH covers the cfacorp regression:
-// a package-lock.json project on a Windows device where Node.js wasn't
-// deployed by IT (npm absent from PATH). Previously this path discarded
-// the exec.CommandContext ENOENT and shipped a NodeScanResult with empty
-// RawStdoutBase64 — indistinguishable on the backend from a successful
-// scan of an empty project. The fix drops the record entirely: "PM not
-// installed" is a normal configuration state, not an error to report.
+// TestNodeScanner_ScanProject_PMNotInPATH covers the empty-payload
+// regression: a package-lock.json project on a Windows device where
+// Node.js isn't deployed (npm absent from PATH). Previously this path
+// discarded the exec.CommandContext ENOENT and shipped a NodeScanResult
+// with empty RawStdoutBase64 — indistinguishable on the backend from a
+// successful scan of an empty project. The fix drops the record entirely:
+// "PM not installed" is a normal configuration state, not an error to
+// report.
 func TestNodeScanner_ScanProject_PMNotInPATH(t *testing.T) {
 	mock := executor.NewMock()
 	mock.SetGOOS("windows")
@@ -396,7 +397,7 @@ func TestNodeScanner_ScanProject_PMNotInPATH(t *testing.T) {
 	mock.SetFile(filepath.Join(projectDir, "package-lock.json"), []byte{})
 
 	scanner := newTestScanner(mock)
-	_, ok := scanner.scanProject(context.Background(), projectDir)
+	_, ok := scanner.scanProject(context.Background(), projectDir, "npm")
 
 	if ok {
 		t.Error("expected scanProject to return ok=false when PM not on PATH (so no record is emitted)")
@@ -406,7 +407,8 @@ func TestNodeScanner_ScanProject_PMNotInPATH(t *testing.T) {
 // TestNodeScanner_ScanProjects_DropsRecordsForMissingPM exercises the
 // loop-level contract end-to-end: a device with multiple package.json
 // files but no installed PM should produce zero records, not zero-result
-// records. This is what cfacorp's broken devices needed.
+// records. Mirrors the field-observed scenario the empty-payload fix
+// addresses.
 func TestNodeScanner_ScanProjects_DropsRecordsForMissingPM(t *testing.T) {
 	mock := executor.NewMock()
 	mock.SetGOOS("windows")
@@ -439,8 +441,8 @@ func TestNodeScanner_ScanProject_BinaryAvailabilityCached(t *testing.T) {
 	mock.SetFile(filepath.Join(dirB, "package-lock.json"), []byte{})
 
 	scanner := newTestScanner(mock)
-	_, firstOK := scanner.scanProject(context.Background(), dirA)
-	_, secondOK := scanner.scanProject(context.Background(), dirB)
+	_, firstOK := scanner.scanProject(context.Background(), dirA, "npm")
+	_, secondOK := scanner.scanProject(context.Background(), dirB, "npm")
 
 	if firstOK || secondOK {
 		t.Errorf("expected both scanProject calls to return ok=false, got firstOK=%v secondOK=%v",
